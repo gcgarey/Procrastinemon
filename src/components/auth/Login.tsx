@@ -4,12 +4,19 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import ProcrastinemonLogo from '@/components/icons/ProcrastinemonLogo';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function Login() {
   const { user, login, loading } = useAuth();
   const router = useRouter();
+  const [hostname, setHostname] = useState('');
+
+  useEffect(() => {
+    // This will only run on the client, after hydration
+    setHostname(window.location.hostname);
+  }, []);
+
 
   useEffect(() => {
     if (!loading && user) {
@@ -37,6 +44,15 @@ export default function Login() {
           Sign in with Google
         </Button>
       </CardContent>
+      {hostname && (
+        <CardContent className="mt-0 pt-0 text-center text-xs text-muted-foreground">
+           <div className="p-3 mt-4 border-t border-border">
+            <p>Authenticating from domain:</p>
+            <p className="font-mono bg-muted p-1 rounded-md my-2 text-foreground font-bold">{hostname}</p>
+            <p className="mt-1">Please ensure this exact domain is in your Firebase project's "Authorized domains" list.</p>
+           </div>
+        </CardContent>
+      )}
     </Card>
   );
 }
