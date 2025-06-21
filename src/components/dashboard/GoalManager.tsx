@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useMemo } from "react";
 import type { Goal } from "@/lib/types";
-import { getAdaptiveMessage } from "@/ai/flows/adaptive-message";
+import { useAuth } from "@/context/AuthContext";
+import { db } from "@/lib/firebase";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,16 +19,50 @@ import SadDemon from "@/components/icons/SadDemon";
 import { Separator } from "@/components/ui/separator";
 
 type DemonState = "happy" | "neutral" | "sad";
+interface UserStats {
+    userXP: number;
+    demonXP: number;
+    currentStreak: number;
+    currentForm: string;
+}
 
 export default function GoalManager() {
+  const { user } = useAuth();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [newGoalText, setNewGoalText] = useState("");
-  const [userXp, setUserXp] = useState(0);
-  const [demonXp, setDemonXp] = useState(0);
+  const [stats, setStats] = useState<UserStats>({ userXP: 0, demonXP: 0, currentStreak: 0, currentForm: 'basic' });
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [aiMessage, setAiMessage] = useState("");
-  const [isLoadingAi, setIsLoadingAi] = useState(false);
+  const [modalMessage, setModalMessage] = useState("");
+  const [isLoadingApi, setIsLoadingApi] = useState(false);
   const { toast } = useToast();
+
+  const today = new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    if (!user) return;
+
+    const userStatsRef = doc(db, "users", user.uid);
+    const unsubscribeStats = onSnapshot(userStatsRef, (doc) => {
+      if (doc.exists()) {
+        setStats(doc.data() as UserStats);
+      }
+    });
+
+    const goalsRef = doc(db, "users", user.uid, "goals", today);
+    const unsubscribeGoals = onSnapshot(goalsRef, (doc) => {
+        if (doc.exists()) {
+            const data = doc.data();
+            setGoals(data.goals || []);
+        } else {
+            setGoals([]);
+        }
+    });
+
+    return () => {
+      unsubscribeStats();
+      unsubscribeGoals();
+    };
+  }, [user, today]);
 
   const completedGoals = useMemo(() => goals.filter((g) => g.completed).length, [goals]);
   const totalGoals = goals.length;
@@ -35,9 +71,15 @@ export default function GoalManager() {
     if (totalGoals === 0) return "neutral";
     const completionRatio = completedGoals / totalGoals;
     if (completionRatio === 1) return "happy";
-    if (completionRatio > 0) return "neutral";
+    if (completionRatio > 0.5) return "neutral";
     return "sad";
   }, [completedGoals, totalGoals]);
+
+  const updateGoalsInFirestore = async (updatedGoals: Goal[]) => {
+    if (!user) return;
+    const goalsRef = doc(db, "users", user.uid, "goals", today);
+    await setDoc(goalsRef, { goals: updatedGoals });
+  };
 
   const handleAddGoal = () => {
     if (newGoalText.trim() === "") {
@@ -53,26 +95,15 @@ export default function GoalManager() {
       text: newGoalText.trim(),
       completed: false,
     };
-    setGoals([...goals, newGoal]);
+    updateGoalsInFirestore([...goals, newGoal]);
     setNewGoalText("");
   };
 
   const handleToggleGoal = (id: number) => {
-    setGoals(
-      goals.map((goal) => {
-        if (goal.id === id) {
-          if (!goal.completed) {
-            setUserXp((prev) => prev + 10);
-            setDemonXp((prev) => prev + 15);
-          } else {
-            setUserXp((prev) => Math.max(0, prev - 10));
-            setDemonXp((prev) => Math.max(0, prev - 15));
-          }
-          return { ...goal, completed: !goal.completed };
-        }
-        return goal;
-      })
+    const updatedGoals = goals.map((goal) => 
+      goal.id === id ? { ...goal, completed: !goal.completed } : goal
     );
+    updateGoalsInFirestore(updatedGoals);
   };
 
   const handleFinishDay = async () => {
@@ -80,30 +111,47 @@ export default function GoalManager() {
         toast({ title: "No goals set!", description: "Add at least one goal to finish the day.", variant: "destructive" });
         return;
     }
+
+    if (!user) {
+        toast({ title: "Not authenticated!", variant: "destructive"});
+        return;
+    }
     
-    setIsLoadingAi(true);
+    setIsLoadingApi(true);
     setIsModalOpen(true);
+    setModalMessage("");
+
     try {
-      const { message } = await getAdaptiveMessage({
-        goalsCompleted: completedGoals,
-        totalGoals: totalGoals,
+      const token = await user.getIdToken();
+      const response = await fetch('/api/resolve-day', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
       });
-      setAiMessage(message);
+      
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to resolve day.');
+      }
+      
+      setModalMessage(data.message);
+      setStats(data.stats);
+
     } catch (error) {
-      setAiMessage("Your Procrastinemon is silent today... must be plotting.");
-      toast({ title: "Error", description: "Could not get message from Procrastinemon.", variant: "destructive" });
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      setModalMessage("Your Procrastinemon is silent today... must be plotting.");
+      toast({ title: "Error", description: errorMessage, variant: "destructive" });
     } finally {
-        setIsLoadingAi(false);
+        setIsLoadingApi(false);
     }
   };
   
   const resetDay = () => {
-    setGoals([]);
-    // XP could persist or reset, for this demo we reset
-    setUserXp(0);
-    setDemonXp(0);
     setIsModalOpen(false);
-    setAiMessage("");
+    setModalMessage("");
   };
 
   const DemonAvatar = () => {
@@ -124,11 +172,11 @@ export default function GoalManager() {
             <div className="space-y-4">
                 <div>
                     <label className="text-sm font-semibold mb-2 block">USER XP</label>
-                    <Progress value={userXp} className="h-4 border border-foreground" />
+                    <Progress value={stats.userXP % 100} className="h-4 border border-foreground" />
                 </div>
                 <div>
                     <label className="text-sm font-semibold mb-2 block">DEMON XP</label>
-                    <Progress value={demonXp} className="h-4 border border-foreground" />
+                    <Progress value={stats.demonXP % 100} className="h-4 border border-foreground" />
                 </div>
             </div>
         </CardContent>
@@ -200,10 +248,10 @@ export default function GoalManager() {
             </DialogDescription>
           </DialogHeader>
           <div className="my-6 p-4 border-2 border-dashed border-foreground rounded-md min-h-[100px] flex items-center justify-center">
-            {isLoadingAi ? (
+            {isLoadingApi ? (
                  <p className="text-muted-foreground animate-pulse">Demon is thinking...</p>
             ) : (
-                <p className="text-center text-base">"{aiMessage}"</p>
+                <p className="text-center text-base">"{modalMessage}"</p>
             )}
           </div>
           <DialogFooter>
