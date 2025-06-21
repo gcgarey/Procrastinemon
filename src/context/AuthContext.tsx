@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { onAuthStateChanged, User, GoogleAuthProvider, signInWithRedirect, signOut } from 'firebase/auth';
+import { onAuthStateChanged, User, GoogleAuthProvider, signInWithRedirect, signOut, getRedirectResult } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 
@@ -20,19 +20,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
 
   useEffect(() => {
+    // This effect handles the result of the redirect
+    getRedirectResult(auth)
+      .catch((error) => {
+        // Handle Errors here.
+        console.error("Error getting redirect result:", error);
+      });
+
+    // This listener maintains auth state
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
     });
+    
     return () => unsubscribe();
   }, []);
 
   const login = async () => {
     try {
+      setLoading(true); // Set loading to true before redirect
       const provider = new GoogleAuthProvider();
       await signInWithRedirect(auth, provider);
     } catch (error) {
       console.error("Error signing in with Google", error);
+      setLoading(false); // Reset loading state on error
     }
   };
 
