@@ -1,14 +1,21 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { onAuthStateChanged, User, GoogleAuthProvider, signInWithRedirect, signOut, getRedirectResult } from 'firebase/auth';
+import { 
+  onAuthStateChanged, 
+  User, 
+  signOut,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+} from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: () => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -20,14 +27,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter();
 
   useEffect(() => {
-    // This effect handles the result of the redirect
-    getRedirectResult(auth)
-      .catch((error) => {
-        // Handle Errors here.
-        console.error("Error getting redirect result:", error);
-      });
-
-    // This listener maintains auth state
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoading(false);
@@ -36,14 +35,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => unsubscribe();
   }, []);
 
-  const login = async () => {
+  const login = async (email: string, password: string) => {
+    setLoading(true);
     try {
-      setLoading(true); // Set loading to true before redirect
-      const provider = new GoogleAuthProvider();
-      await signInWithRedirect(auth, provider);
+      await signInWithEmailAndPassword(auth, email, password);
     } catch (error) {
-      console.error("Error signing in with Google", error);
-      setLoading(false); // Reset loading state on error
+      console.error("Error signing in", error);
+      setLoading(false);
+      throw error;
+    }
+  };
+
+  const register = async (email: string, password: string) => {
+    setLoading(true);
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      console.error("Error registering user", error);
+      setLoading(false);
+      throw error;
     }
   };
 
@@ -58,7 +68,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );
