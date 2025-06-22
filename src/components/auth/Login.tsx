@@ -107,7 +107,7 @@ export default function Login() {
             </Button>
           </form>
         </Form>
-        <Button variant="link" onClick={() => setIsRegisterView(!isRegisterView)} className="w-full mt-4 text-sm">
+        <Button variant="link" onClick={() => setIsRegisterView(!isRegisterView)} className="w-full mt-4 text-xs whitespace-normal h-auto">
           {isRegisterView ? 'Already have an account? Login' : "Don't have an account? Register"}
         </Button>
       </CardContent>
